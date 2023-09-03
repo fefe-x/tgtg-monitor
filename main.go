@@ -20,13 +20,13 @@ type Favorite struct {
 			MinorUnits int    `json:"minor_units"`
 			Decimals   int    `json:"decimals"`
 		} `json:"item_price"`
-	} `json:"item,omitempty"`
+	} `json:"item"`
 
 	DisplayName    string `json:"display_name"`
 	PickupInterval struct {
 		Start time.Time `json:"start"`
 		End   time.Time `json:"end"`
-	} `json:"pickup_interval,omitempty"`
+	} `json:"pickup_interval"`
 	ItemsAvailable int `json:"items_available"`
 }
 
@@ -66,18 +66,18 @@ type PollingPayload struct {
 
 type FavoritesPayload struct {
 	Bucket struct {
-		FillerType string `json:"filler_type,omitempty"`
-	} `json:"bucket,omitempty"`
+		FillerType string `json:"filler_type"`
+	} `json:"bucket"`
 	Origin struct {
-		Latitude  float64 `json:"latitude,omitempty"`
-		Longitude float64 `json:"longitude,omitempty"`
-	} `json:"origin,omitempty"`
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
+	} `json:"origin"`
 	Paging struct {
-		Page int `json:"page,omitempty"`
-		Size int `json:"size,omitempty"`
-	} `json:"paging,omitempty"`
-	Radius float64 `json:"radius,omitempty"`
-	UserId string  `json:"user_id,omitempty"`
+		Page int `json:"page"`
+		Size int `json:"size"`
+	} `json:"paging"`
+	Radius float64 `json:"radius"`
+	UserId string  `json:"user_id"`
 }
 
 type FavoritesResponse struct {
@@ -90,13 +90,13 @@ type FavoritesResponse struct {
 					MinorUnits int    `json:"minor_units"`
 					Decimals   int    `json:"decimals"`
 				} `json:"item_price"`
-			} `json:"item,omitempty"`
+			} `json:"item"`
 
 			DisplayName    string `json:"display_name"`
 			PickupInterval struct {
 				Start time.Time `json:"start"`
 				End   time.Time `json:"end"`
-			} `json:"pickup_interval,omitempty"`
+			} `json:"pickup_interval"`
 			ItemsAvailable int `json:"items_available"`
 		} `json:"items"`
 	} `json:"mobile_bucket"`
@@ -141,6 +141,7 @@ func login(client *http.Client, account Account) {
 	loginPayload := LoginPayload{DeviceType: "ANDROID", Email: account.Email}
 
 	loginPayloadMarshalled, err := json.Marshal(loginPayload)
+	check(err)
 	loginReq, err := http.NewRequest("POST", login_url, bytes.NewReader(loginPayloadMarshalled))
 	check(err)
 	loginReq.Header = http.Header{
@@ -167,6 +168,7 @@ func login(client *http.Client, account Account) {
 	}
 	pollingPayload := PollingPayload{DeviceType: "ANDROID", Email: account.Email, RequestPollingId: result.PollingID}
 	pollingPayloadMarshalled, err := json.Marshal(pollingPayload)
+	check(err)
 	waiting := true
 	var pollingResult PollingResponse
 
@@ -211,7 +213,7 @@ func login(client *http.Client, account Account) {
 
 	var startupResult StartupResponse
 
-	startupRequest, err := http.NewRequest("POST", favorites_url, nil)
+	startupRequest, err := http.NewRequest("POST", startup_url, nil)
 	check(err)
 	startupRequest.Header = http.Header{
 		"user-agent":      {"TGTG/23.8.11 Dalvik/2.1.0 (Linux; U; Android 11; GM1913 Build/RKQ1.201022.002)"},
@@ -235,7 +237,7 @@ func login(client *http.Client, account Account) {
 	if err := json.Unmarshal(startupBody, &startupResult); err != nil {
 		panic(err)
 	}
-
+	fmt.Println("startup: ", startupResult.User.UserId)
 	account.UserId = startupResult.User.UserId
 
 	fmt.Println("logged in")
@@ -248,29 +250,32 @@ func getFavorites(client *http.Client, account Account) FavoritesResponse {
 	var result FavoritesResponse
 	favoritesPayload := FavoritesPayload{
 		Bucket: struct {
-			FillerType string "json:\"filler_type,omitempty\""
+			FillerType string `json:"filler_type"`
 		}{
 			FillerType: "Favorites",
 		},
 		Origin: struct {
-			Latitude  float64 "json:\"latitude,omitempty\""
-			Longitude float64 "json:\"longitude,omitempty\""
+			Latitude  float64 "json:\"latitude\""
+			Longitude float64 "json:\"longitude\""
 		}{
 			Latitude:  0.0,
 			Longitude: 0.0,
 		},
 		Paging: struct {
-			Page int "json:\"page,omitempty\""
-			Size int "json:\"size,omitempty\""
+			Page int "json:\"page\""
+			Size int "json:\"size\""
 		}{
 			Page: 0,
 			Size: 50,
 		},
-		Radius: 0,
+		Radius: 30.0,
 		UserId: account.UserId,
 	}
 
+	fmt.Println(favoritesPayload)
+
 	favoritesPayloadMarshalled, err := json.Marshal(favoritesPayload)
+	check(err)
 	favoritesRequest, err := http.NewRequest("POST", favorites_url, bytes.NewReader(favoritesPayloadMarshalled))
 	check(err)
 
@@ -284,11 +289,18 @@ func getFavorites(client *http.Client, account Account) FavoritesResponse {
 		"accept-encoding": {"gzip"},
 	}
 
+	fmt.Println("headers", favoritesRequest.Header)
+
 	favoritesResp, err := client.Do(favoritesRequest)
-
+	for favoritesResp.StatusCode == 403 || favoritesResp.StatusCode == 429 {
+		fmt.Println(favoritesResp.StatusCode)
+		time.Sleep(1000 * time.Second)
+	}
 	check(err)
-
+	fmt.Println(favoritesPayloadMarshalled)
 	favoritesBody, err := io.ReadAll(favoritesResp.Body)
+	fmt.Println(favoritesBody)
+	fmt.Println(favoritesResp)
 
 	check(err)
 	favoritesResp.Body.Close()
@@ -382,6 +394,7 @@ func main() {
 		UserId:         "",
 		Favorites:      make(map[string]Favorite),
 		WebhookUrl:     scanned[1],
+		FavoritesSet:   false,
 	}
 	jar, err := cookiejar.New(nil)
 	check(err)
@@ -395,11 +408,14 @@ func main() {
 		time.Sleep(10 * time.Second)
 		fmt.Println("Monitoring...")
 		favorites := getFavorites(client, account)
-
+		fmt.Println(favorites)
 		if !account.FavoritesSet { // initialise favorites if not loaded yet
+			fmt.Println("not set yet")
 			for i := 0; i < len(favorites.Bucket.Items); i++ {
 				current := favorites.Bucket.Items[i]
 				account.Favorites[current.Item.ItemID] = current
+				fmt.Println("one more item")
+				sendEmbed(client, account.WebhookUrl, account.Favorites[current.Item.ItemID])
 			}
 			account.FavoritesSet = true
 		} else { // check if stock was 0 and is now >= 1 for any favorite, send webhook if yes
