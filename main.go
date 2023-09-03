@@ -312,7 +312,7 @@ func getRestockedItems(client *http.Client, account Account, new FavoritesRespon
 	for i := 0; i < len(newItems); i++ {
 		currentNew := newItems[i]
 		currentOld := account.Favorites[currentNew.Item.ItemID]
-		if currentOld.ItemsAvailable == 0 && currentNew.ItemsAvailable >= 1 {
+		if currentOld.ItemsAvailable < currentNew.ItemsAvailable {
 			wasRestock = true
 			sendEmbed(client, account.WebhookUrl, currentNew)
 			currentOld.ItemsAvailable = currentNew.ItemsAvailable
@@ -361,7 +361,7 @@ func sendEmbed(client *http.Client, webhookUrl string, item Favorite) {
 }
 
 func main() {
-	dat, err := os.Open("/config")
+	dat, err := os.Open("./config")
 	check(err)
 	defer dat.Close()
 
