@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -33,10 +34,10 @@ type Favorite struct {
 type Account struct {
 	Email string `json:"email"`
 	//PollingId      string `json:"polling-id"`
-	AccessToken    string `json:"access-token"`
-	RefreshToken   string `json:"refresh-token"`
-	DatadomeCookie string `json:"datadome"`
-	UserId         string `json:"user-id"`
+	AccessToken    string      `json:"access-token"`
+	RefreshToken   string      `json:"refresh-token"`
+	DatadomeCookie http.Cookie `json:"datadome"`
+	UserId         string      `json:"user-id"`
 	Favorites      map[string]Favorite
 	FavoritesSet   bool
 	WebhookUrl     string
@@ -135,7 +136,7 @@ const startup_url string = "https://apptoogoodtogo.com/api/app/v1/onStartup"
 
 //const webhook_url string = os.Getenv(key)
 
-func login(client *http.Client, account Account) {
+func login(client *http.Client, account *Account) {
 	fmt.Println("logging in...")
 
 	loginPayload := LoginPayload{DeviceType: "ANDROID", Email: account.Email}
@@ -158,6 +159,7 @@ func login(client *http.Client, account Account) {
 	if status := loginResp.StatusCode; status == 429 || status == 403 {
 		panic(status)
 	}
+	updateDatadome(*loginResp, account)
 	loginBody, err := io.ReadAll(loginResp.Body)
 	check(err)
 	loginResp.Body.Close()
@@ -189,7 +191,7 @@ func login(client *http.Client, account Account) {
 		pollingResp, err := client.Do(pollingRequest)
 		fmt.Println("polling status", pollingResp.StatusCode)
 		check(err)
-
+		updateDatadome(*pollingResp, account)
 		pollingBody, err := io.ReadAll(pollingResp.Body)
 		if len(pollingBody) == 0 {
 			fmt.Println("empty polling body")
@@ -205,10 +207,10 @@ func login(client *http.Client, account Account) {
 			panic(err)
 		}
 	}
-
+	//fmt.Println(pollingResult)
 	account.AccessToken = pollingResult.AccessToken
 	account.RefreshToken = pollingResult.RefreshToken
-
+	fmt.Println("token", account.AccessToken)
 	// request to startup_url
 
 	var startupResult StartupResponse
@@ -228,7 +230,7 @@ func login(client *http.Client, account Account) {
 	startupResp, err := client.Do(startupRequest)
 
 	check(err)
-
+	updateDatadome(*startupResp, account)
 	startupBody, err := io.ReadAll(startupResp.Body)
 
 	check(err)
@@ -239,12 +241,33 @@ func login(client *http.Client, account Account) {
 	}
 	fmt.Println("startup: ", startupResult.User.UserId)
 	account.UserId = startupResult.User.UserId
+	fmt.Println("account: ", account.UserId)
 
-	fmt.Println("logged in")
+	fmt.Println("logged in with user-id", account.UserId)
+}
+
+func updateDatadome(resp http.Response, account *Account) {
+	cookie := resp.Header.Get("set-cookie")
+
+	var pairs = strings.Split(cookie, ";")
+	account.DatadomeCookie = http.Cookie{
+		Name:       "datadome",
+		Value:      pairs[0],
+		Path:       "/",
+		Domain:     ".apptoogoodtogo.com",
+		Expires:    time.Time{},
+		RawExpires: "",
+		MaxAge:     0,
+		Secure:     true,
+		HttpOnly:   false,
+		SameSite:   0,
+		Raw:        "",
+		Unparsed:   []string{},
+	}
 
 }
 
-func getFavorites(client *http.Client, account Account) FavoritesResponse {
+func getFavorites(client *http.Client, account *Account) FavoritesResponse {
 	// send request to item endpoint, return struct that contains relevant information to be sent in webhook/used to retry
 	// item name, stock level, ...
 	var result FavoritesResponse
@@ -255,15 +278,15 @@ func getFavorites(client *http.Client, account Account) FavoritesResponse {
 			FillerType: "Favorites",
 		},
 		Origin: struct {
-			Latitude  float64 "json:\"latitude\""
-			Longitude float64 "json:\"longitude\""
+			Latitude  float64 `json:"latitude"`
+			Longitude float64 `json:"longitude"`
 		}{
 			Latitude:  0.0,
 			Longitude: 0.0,
 		},
 		Paging: struct {
-			Page int "json:\"page\""
-			Size int "json:\"size\""
+			Page int `json:"page"`
+			Size int `json:"size"`
 		}{
 			Page: 0,
 			Size: 50,
@@ -272,35 +295,34 @@ func getFavorites(client *http.Client, account Account) FavoritesResponse {
 		UserId: account.UserId,
 	}
 
-	fmt.Println(favoritesPayload)
-
 	favoritesPayloadMarshalled, err := json.Marshal(favoritesPayload)
 	check(err)
 	favoritesRequest, err := http.NewRequest("POST", favorites_url, bytes.NewReader(favoritesPayloadMarshalled))
 	check(err)
 
+	var bearer = "Bearer " + account.AccessToken
+	var datadomeCookie = account.DatadomeCookie
+
 	favoritesRequest.Header = http.Header{
 		"user-agent":      {"TGTG/23.8.11 Dalvik/2.1.0 (Linux; U; Android 11; GM1913 Build/RKQ1.201022.002)"},
 		"accept-language": {"en-GB"},
 		"accept":          {"application/json"},
-		"authorization":   {"Bearer " + account.AccessToken},
 		"Content-Type":    {"application/json; charset=utf-8"},
 		//"Content-Length":  {"145"},
 		"accept-encoding": {"gzip"},
 	}
 
-	fmt.Println("headers", favoritesRequest.Header)
+	favoritesRequest.Header.Add("Authorization", bearer)
+	favoritesRequest.Header.Add("cookie", datadomeCookie.Value)
 
 	favoritesResp, err := client.Do(favoritesRequest)
 	for favoritesResp.StatusCode == 403 || favoritesResp.StatusCode == 429 {
 		fmt.Println(favoritesResp.StatusCode)
 		time.Sleep(1000 * time.Second)
 	}
+	updateDatadome(*favoritesResp, account)
 	check(err)
-	fmt.Println(favoritesPayloadMarshalled)
 	favoritesBody, err := io.ReadAll(favoritesResp.Body)
-	fmt.Println(favoritesBody)
-	fmt.Println(favoritesResp)
 
 	check(err)
 	favoritesResp.Body.Close()
@@ -318,7 +340,7 @@ func check(e error) {
 	}
 }
 
-func getRestockedItems(client *http.Client, account Account, new FavoritesResponse) bool {
+func getRestockedItems(client *http.Client, account *Account, new FavoritesResponse) bool {
 	wasRestock := false
 	newItems := new.Bucket.Items
 	for i := 0; i < len(newItems); i++ {
@@ -351,7 +373,7 @@ func sendEmbed(client *http.Client, webhookUrl string, item Favorite) {
 					},
 					{
 						Name:  "Price",
-						Value: fmt.Sprint(item.Item.ItemPrice.MinorUnits/100.0) + " " + item.Item.ItemPrice.Code,
+						Value: fmt.Sprint(float64(item.Item.ItemPrice.MinorUnits)/100.0) + " " + item.Item.ItemPrice.Code,
 					},
 				},
 			},
@@ -363,6 +385,13 @@ func sendEmbed(client *http.Client, webhookUrl string, item Favorite) {
 	check(err)
 	embedRequest, err := http.NewRequest("POST", webhookUrl, bytes.NewReader(embedMarshalled))
 	check(err)
+	embedRequest.Header = http.Header{
+		"user-agent":      {"TGTG/23.8.11 Dalvik/2.1.0 (Linux; U; Android 11; GM1913 Build/RKQ1.201022.002)"},
+		"accept-language": {"en-GB"},
+		"accept":          {"application/json"},
+		"Content-Type":    {"application/json; charset=utf-8"},
+		"accept-encoding": {"gzip"},
+	}
 	embedResponse, err := client.Do(embedRequest)
 	check(err)
 	if embedResponse.StatusCode == 204 {
@@ -386,11 +415,11 @@ func main() {
 		scanned[i] = scanner.Text()
 	}
 
-	account := Account{
+	account := &Account{
 		Email:          scanned[0],
 		AccessToken:    "",
 		RefreshToken:   "",
-		DatadomeCookie: "",
+		DatadomeCookie: http.Cookie{},
 		UserId:         "",
 		Favorites:      make(map[string]Favorite),
 		WebhookUrl:     scanned[1],
@@ -408,14 +437,12 @@ func main() {
 		time.Sleep(10 * time.Second)
 		fmt.Println("Monitoring...")
 		favorites := getFavorites(client, account)
-		fmt.Println(favorites)
 		if !account.FavoritesSet { // initialise favorites if not loaded yet
-			fmt.Println("not set yet")
+			fmt.Println("initialising favorites")
 			for i := 0; i < len(favorites.Bucket.Items); i++ {
 				current := favorites.Bucket.Items[i]
 				account.Favorites[current.Item.ItemID] = current
-				fmt.Println("one more item")
-				sendEmbed(client, account.WebhookUrl, account.Favorites[current.Item.ItemID])
+				//sendEmbed(client, account.WebhookUrl, account.Favorites[current.Item.ItemID])
 			}
 			account.FavoritesSet = true
 		} else { // check if stock was 0 and is now >= 1 for any favorite, send webhook if yes
