@@ -134,8 +134,6 @@ const favorites_url string = "https://apptoogoodtogo.com/api/discover/v1/bucket"
 
 const startup_url string = "https://apptoogoodtogo.com/api/app/v1/onStartup"
 
-//const webhook_url string = os.Getenv(key)
-
 func login(client *http.Client, account *Account) {
 	fmt.Println("logging in...")
 
@@ -150,7 +148,6 @@ func login(client *http.Client, account *Account) {
 		"accept-language": {"en-GB"},
 		"accept":          {"application/json"},
 		"Content-Type":    {"application/json; charset=utf-8"},
-		//"Content-Length":  {"55"},
 		"accept-encoding": {"gzip"},
 	}
 
@@ -184,7 +181,6 @@ func login(client *http.Client, account *Account) {
 			"accept-language": {"en-GB"},
 			"accept":          {"application/json"},
 			"Content-Type":    {"application/json; charset=utf-8"},
-			//"Content-Length":  {"145"},
 			"accept-encoding": {"gzip"},
 		}
 
@@ -199,7 +195,6 @@ func login(client *http.Client, account *Account) {
 		} else {
 			waiting = false
 		}
-		//fmt.Println("body:", pollingBody)
 		check(err)
 
 		pollingResp.Body.Close()
@@ -207,12 +202,8 @@ func login(client *http.Client, account *Account) {
 			panic(err)
 		}
 	}
-	//fmt.Println(pollingResult)
 	account.AccessToken = pollingResult.AccessToken
 	account.RefreshToken = pollingResult.RefreshToken
-	fmt.Println("token", account.AccessToken)
-	// request to startup_url
-
 	var startupResult StartupResponse
 
 	startupRequest, err := http.NewRequest("POST", startup_url, nil)
@@ -223,7 +214,6 @@ func login(client *http.Client, account *Account) {
 		"accept":          {"application/json"},
 		"authorization":   {"Bearer " + account.AccessToken},
 		"Content-Type":    {"application/json; charset=utf-8"},
-		//"Content-Length":  {"145"},
 		"accept-encoding": {"gzip"},
 	}
 
@@ -239,9 +229,7 @@ func login(client *http.Client, account *Account) {
 	if err := json.Unmarshal(startupBody, &startupResult); err != nil {
 		panic(err)
 	}
-	fmt.Println("startup: ", startupResult.User.UserId)
 	account.UserId = startupResult.User.UserId
-	fmt.Println("account: ", account.UserId)
 
 	fmt.Println("logged in with user-id", account.UserId)
 }
@@ -308,7 +296,6 @@ func getFavorites(client *http.Client, account *Account) FavoritesResponse {
 		"accept-language": {"en-GB"},
 		"accept":          {"application/json"},
 		"Content-Type":    {"application/json; charset=utf-8"},
-		//"Content-Length":  {"145"},
 		"accept-encoding": {"gzip"},
 	}
 
@@ -445,7 +432,7 @@ func main() {
 				//sendEmbed(client, account.WebhookUrl, account.Favorites[current.Item.ItemID])
 			}
 			account.FavoritesSet = true
-		} else { // check if stock was 0 and is now >= 1 for any favorite, send webhook if yes
+		} else { // loop through favorites, sending webhook if old stock level < new stock level
 			wasRestocked := getRestockedItems(client, account, favorites)
 			if wasRestocked {
 				fmt.Println("found a restock")
