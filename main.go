@@ -429,7 +429,9 @@ func main() {
 			for i := 0; i < len(favorites.Bucket.Items); i++ {
 				current := favorites.Bucket.Items[i]
 				account.Favorites[current.Item.ItemID] = current
-				//sendEmbed(client, account.WebhookUrl, account.Favorites[current.Item.ItemID])
+				if i == 0 { // send one webhook as test
+					sendEmbed(client, account.WebhookUrl, account.Favorites[current.Item.ItemID])
+				}
 			}
 			account.FavoritesSet = true
 		} else { // loop through favorites, sending webhook if old stock level < new stock level
