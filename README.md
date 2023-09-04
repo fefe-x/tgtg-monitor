@@ -8,7 +8,6 @@ A file named "config" needs to be placed in the same folder as main.go with an a
 The script monitors all favorites in the account corresponding to the specified email address
 
 # To Do
-- Handling datadome (set datadome cookie on response)
 - Adding proxy support
 - Adding support for multiple accounts
-- Adding autocheckout support
+- Adding autocheckout support (CH payment methods)
